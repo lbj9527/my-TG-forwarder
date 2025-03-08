@@ -2,7 +2,7 @@ import json
 import asyncio
 import time
 from telethon import TelegramClient
-from telethon.tl.types import InputPeerChannel
+from telethon.tl.types import InputPeerChannel, PeerChannel
 from telethon.errors import FloodWaitError, ChannelPrivateError, ChatAdminRequiredError
 from loguru import logger
 import python_socks
@@ -69,18 +69,34 @@ class ConfigValidator:
         errors = []
         if 'source_channel' not in config or not config['source_channel']:
             errors.append("缺少source_channel或source_channel为空")
+        elif isinstance(config['source_channel'], str):
+            # 验证频道ID格式
+            if config['source_channel'].startswith('-'):
+                channel_id = config['source_channel'].lstrip('-')
+                if not channel_id.isdigit():
+                    errors.append("source_channel的频道ID格式无效")
 
         if 'target_channel' not in config:
             errors.append("缺少target_channel配置")
         elif isinstance(config['target_channel'], str):
             if not config['target_channel']:
                 errors.append("target_channel为空")
+            # 验证单个频道ID格式
+            elif config['target_channel'].startswith('-'):
+                channel_id = config['target_channel'].lstrip('-')
+                if not channel_id.isdigit():
+                    errors.append("target_channel的频道ID格式无效")
         elif isinstance(config['target_channel'], list):
             if not config['target_channel']:
                 errors.append("target_channel数组为空")
             for idx, channel in enumerate(config['target_channel']):
                 if not isinstance(channel, str) or not channel:
                     errors.append(f"target_channel数组中第{idx+1}个元素无效或为空")
+                # 验证数组中的频道ID格式
+                elif channel.startswith('-'):
+                    channel_id = channel.lstrip('-')
+                    if not channel_id.isdigit():
+                        errors.append(f"target_channel数组中第{idx+1}个频道ID格式无效")
         else:
             errors.append("target_channel必须是字符串或字符串数组")
         return errors
@@ -382,7 +398,7 @@ class MessageCollector:
                     current_id = batch_end + 1
                     continue
                 
-                # 处理获取到的消息
+                # 处理获取到的消息                for message in messages:
                 for message in messages:
                     # 跳过空消息或服务消息
                     if message is None or message.action is not None:
@@ -420,78 +436,47 @@ class MessageCollector:
             logger.error(f"收集消息失败: {e}")
             raise
 
-
-class ForwarderApp:
-    """转发应用类，负责协调各个组件完成转发任务"""
-    
-    def __init__(self):
-        self.config = None
-        self.client_manager = None
-        self.client = None
-        self.message_collector = None
-        self.message_handler = None
-    
-    async def initialize(self) -> None:
-        """初始化应用"""
+    async def get_entity(self, channel_identifier: str):
+        """获取频道实体，支持多种格式的频道标识符"""
         try:
-            # 加载配置
-            logger.info("开始加载配置文件...")
-            self.config = await ConfigManager.load_config()
-            logger.info("配置文件加载成功")
-            
-            # 创建客户端管理器
-            self.client_manager = TelegramClientManager(self.config)
-            
-            # 创建并连接客户端
-            logger.info("开始创建Telegram客户端...")
-            self.client = await self.client_manager.create_client()
-            
-            # 连接并授权
-            logger.info("开始连接并授权...")
-            await self.client_manager.connect_and_authorize()
-            
-            # 创建消息收集器和处理器
-            self.message_collector = MessageCollector(self.client)
-            self.message_handler = MessageHandler(self.client, self.config)
-            
-            logger.info("应用初始化完成")
-        except Exception as e:
-            logger.error(f"初始化应用失败: {e}")
+            # 如果是数字ID格式（以'-'开头）
+            if channel_identifier.startswith('-'):
+                # 去掉负号并检查是否为纯数字
+                channel_id = channel_identifier.lstrip('-')
+                if channel_id.isdigit():
+                    # 对于以-100开头的公开频道
+                    if channel_identifier.startswith('-100'):
+                        channel_id = int(channel_id)
+                        return await self.client.get_entity(PeerChannel(channel_id - 1000000000000))
+                    # 对于其他格式的私有频道或群组
+                    else:
+                        channel_id = int(channel_identifier)
+                        return await self.client.get_entity(channel_id)
+            # 其他格式（用户名或链接）
+            return await self.client.get_entity(channel_identifier)
+        except ValueError as e:
+            logger.error(f"无效的频道标识符格式: {channel_identifier}, 错误: {e}")
             raise
-    
-    async def run(self) -> None:
-        """运行转发任务"""
+        except Exception as e:
+            logger.error(f"获取频道实体失败: {channel_identifier}, 错误: {e}")
+            raise
+
+    async def run(self):
+        """运行消息转发任务"""
         try:
-            # 获取源频道和目标频道
-            source_channel = self.config['source_channel']
-            target_channels = self.config['target_channel']
-            if isinstance(target_channels, str):
-                target_channels = [target_channels]
-            
-            # 获取消息范围
-            start_id = self.config['message_range']['start_id']
-            end_id = self.config['message_range']['end_id']
-            
-            # 确定实际的消息范围
-            logger.info(f"开始确定消息范围，配置范围: {start_id} - {end_id}")
-            start_id, end_id = await self.message_collector.get_message_range(source_channel, start_id, end_id)
-            logger.info(f"实际消息范围: {start_id} - {end_id}")
-            
-            # 收集消息
-            logger.info(f"开始从频道 {source_channel} 收集消息...")
-            messages = await self.message_collector.collect_messages(source_channel, start_id, end_id)
-            logger.info(f"共收集到 {len(messages)} 条消息/媒体组")
-            
-            # 如果没有消息，直接返回
-            if not messages:
-                logger.warning("没有找到需要转发的消息")
+            # 获取源频道实体
+            try:
+                source_entity = await self.get_entity(self.source_channel)
+                logger.info(f"成功获取源频道实体: {self.source_channel}")
+            except Exception as e:
+                logger.error(f"获取源频道实体时出错: {e}")
                 return
-            
-            # 获取所有目标频道实体
+
+            # 获取目标频道实体
             target_entities = {}
-            for target_channel in target_channels:
+            for target_channel in self.target_channels:
                 try:
-                    target_entity = await self.client.get_entity(target_channel)
+                    target_entity = await self.get_entity(target_channel)
                     target_entities[target_channel] = target_entity
                     logger.info(f"成功获取频道实体: {target_channel}")
                 except ChannelPrivateError:
@@ -530,22 +515,134 @@ class ForwarderApp:
             logger.info("已断开Telegram客户端连接")
 
 
-async def main() -> None:
+class ForwarderApp:
+    """Telegram消息转发应用类，负责协调和管理整个应用的功能"""
+    
+    def __init__(self):
+        self.config = None
+        self.client_manager = None
+        self.message_collector = None
+        self.message_handler = None
+        self.source_channel = None
+        self.target_channels = None
+        self.message_range = None
+
+    async def initialize(self) -> None:
+        """初始化应用"""
+        try:
+            # 加载配置
+            self.config = await ConfigManager.load_config()
+            
+            # 初始化客户端管理器
+            self.client_manager = TelegramClientManager(self.config)
+            await self.client_manager.connect_and_authorize()
+            
+            # 获取客户端实例
+            client = self.client_manager.client
+            
+            # 初始化消息处理器
+            self.message_handler = MessageHandler(client, self.config)
+            
+            # 初始化消息收集器
+            self.message_collector = MessageCollector(client)
+            
+            # 设置频道信息
+            self.source_channel = self.config['source_channel']
+            self.target_channels = (
+                [self.config['target_channel']]
+                if isinstance(self.config['target_channel'], str)
+                else self.config['target_channel']
+            )
+            
+            # 设置消息范围
+            self.message_range = self.config['message_range']
+            logger.info("应用初始化完成")
+        except Exception as e:
+            logger.error(f"应用初始化失败: {e}")
+            raise
+
+    async def run(self) -> None:
+        """运行转发任务"""
+        try:
+            # 获取实际的消息范围
+            start_id, end_id = await self.message_collector.get_message_range(
+                self.source_channel,
+                self.message_range['start_id'],
+                self.message_range['end_id']
+            )
+            
+            # 收集需要转发的消息
+            messages = await self.message_collector.collect_messages(
+                self.source_channel,
+                start_id,
+                end_id
+            )
+            
+            if not messages:
+                logger.warning("没有找到需要转发的消息")
+                return
+            
+            # 获取源频道实体
+            try:
+                source_entity = await self.message_collector.get_entity(self.source_channel)
+                logger.info(f"成功获取源频道实体: {self.source_channel}")
+            except Exception as e:
+                logger.error(f"获取源频道实体时出错: {e}")
+                return
+            
+            # 获取目标频道实体
+            target_entities = {}
+            for target_channel in self.target_channels:
+                try:
+                    target_entity = await self.message_collector.get_entity(target_channel)
+                    target_entities[target_channel] = target_entity
+                    logger.info(f"成功获取频道实体: {target_channel}")
+                except ChannelPrivateError:
+                    logger.error(f"无法访问私有频道: {target_channel}，跳过此频道")
+                except ChatAdminRequiredError:
+                    logger.error(f"需要管理员权限才能在频道 {target_channel} 发送消息，跳过此频道")
+                except Exception as e:
+                    logger.error(f"获取频道 {target_channel} 实体时出错: {e}，跳过此频道")
+            
+            # 如果没有有效的目标频道，直接返回
+            if not target_entities:
+                logger.warning("没有有效的目标频道，转发任务终止")
+                return
+            
+            # 按消息循环，同时转发到所有目标频道
+            for i, message in enumerate(messages):
+                logger.info(f"正在转发第 {i+1}/{len(messages)} 条消息到所有目标频道...")
+                
+                # 同时转发到所有目标频道
+                for target_channel, target_entity in target_entities.items():
+                    try:
+                        await self.message_handler.send_message(target_entity, message)
+                        logger.info(f"消息 {i+1}/{len(messages)} 成功转发到频道 {target_channel}")
+                    except Exception as e:
+                        logger.error(f"向频道 {target_channel} 转发消息 {i+1} 时出错: {e}")
+            
+            logger.info("所有转发任务完成")
+        except Exception as e:
+            logger.error(f"运行转发任务失败: {e}")
+            raise
+
+    async def close(self) -> None:
+        """关闭应用"""
+        if self.client_manager and self.client_manager.client:
+            await self.client_manager.client.disconnect()
+            logger.info("已断开Telegram客户端连接")
+
+
+async def main():
     """主函数"""
     app = ForwarderApp()
     try:
-        # 初始化应用
         await app.initialize()
-        
-        # 运行转发任务
         await app.run()
     except Exception as e:
-        logger.error(f"程序执行出错: {e}")
+        logger.error(f"程序运行出错: {e}")
     finally:
-        # 确保关闭应用
         await app.close()
 
-
-if __name__ == "__main__":
-    # 运行主函数
+if __name__ == '__main__':
     asyncio.run(main())

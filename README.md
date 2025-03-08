@@ -27,7 +27,6 @@ Telegram 消息转发工具使用说明
 
      - 频道链接：https://t.me/channel_name
      - 用户名：@channel_name
-     - 频道 ID：-100xxxxxxxxxx
 
    - target_channel：目标频道，支持单个频道或频道数组，格式如下：
 
