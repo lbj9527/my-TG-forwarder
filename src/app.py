@@ -1,4 +1,4 @@
-from typing import Dict, Any, List, Union
+from typing import Dict, Any, List, Union, Optional
 from loguru import logger
 from telethon.errors import ChannelPrivateError, ChatAdminRequiredError
 from .config import ConfigManager
@@ -9,13 +9,13 @@ class ForwarderApp:
     """Telegram消息转发应用类，负责协调和管理整个应用的功能"""
     
     def __init__(self):
-        self.config = None
-        self.client_manager = None
-        self.message_collector = None
-        self.message_handler = None
-        self.source_channel = None
-        self.target_channels = None
-        self.message_range = None
+        self.config: Optional[Dict[str, Any]] = None
+        self.client_manager: Optional[TelegramClientManager] = None
+        self.message_collector: Optional[MessageCollector] = None
+        self.message_handler: Optional[MessageHandler] = None
+        self.source_channel: Optional[str] = None
+        self.target_channels: List[str] = []
+        self.message_range: Optional[Dict[str, int]] = None
 
     async def initialize(self) -> None:
         """初始化应用"""
@@ -29,6 +29,8 @@ class ForwarderApp:
             
             # 获取客户端实例
             client = self.client_manager.client
+            if client is None:
+                raise ValueError("TelegramClient实例不能为None")
             
             # 初始化消息处理器
             self.message_handler = MessageHandler(client, self.config)
@@ -41,7 +43,7 @@ class ForwarderApp:
             self.target_channels = (
                 [self.config['target_channel']]
                 if isinstance(self.config['target_channel'], str)
-                else self.config['target_channel']
+                else list(self.config['target_channel'])
             )
             
             # 设置消息范围
@@ -54,6 +56,15 @@ class ForwarderApp:
     async def run(self) -> None:
         """运行转发任务"""
         try:
+            if self.source_channel is None:
+                logger.error("源频道未设置")
+                return
+                
+            # 检查message_range是否为None
+            if self.message_range is None:
+                logger.error("消息范围未设置")
+                return
+                
             # 获取实际的消息范围
             start_id, end_id = await self.message_collector.get_message_range(
                 self.source_channel,
@@ -118,6 +129,6 @@ class ForwarderApp:
 
     async def close(self) -> None:
         """关闭应用"""
-        if self.client_manager and self.client_manager.client:
+        if self.client_manager is not None and self.client_manager.client is not None:
             await self.client_manager.client.disconnect()
             logger.info("已断开Telegram客户端连接")

@@ -10,6 +10,8 @@ class MessageCollector:
     """消息收集器类，负责收集和处理消息"""
     
     def __init__(self, client: TelegramClient):
+        if client is None:
+            raise ValueError("TelegramClient实例不能为None")
         self.client = client
 
     async def get_entity(self, channel_id: str):
@@ -20,16 +22,20 @@ class MessageCollector:
             logger.error(f"获取频道实体失败: {e}")
             raise
 
-    async def get_message_range(self, source_channel: str, start_id: int, end_id: int) -> tuple[int, int]:
+    async def get_message_range(self, source_channel: Union[str, None], start_id: int, end_id: int) -> tuple[int, int]:
+        if source_channel is None:
+            raise ValueError("源频道不能为None")
         """获取实际的消息范围"""
         try:
             entity = await self.client.get_entity(source_channel)
             if end_id == 0:
                 # 获取最新消息的ID
                 messages = await self.client.get_messages(entity, limit=1)
-                if not messages:
+                if not messages or len(messages) == 0:
                     raise ValueError("无法获取最新消息ID")
-                end_id = messages[0].id
+                # 确保messages是一个列表且有元素
+                first_message = messages[0] if isinstance(messages, (list, tuple)) else messages
+                end_id = first_message.id
                 logger.info(f"获取到最新消息ID: {end_id}")
             return start_id, end_id
         except Exception as e:
@@ -104,6 +110,8 @@ class MessageHandler:
     """消息处理器类，负责转发消息"""
     
     def __init__(self, client: TelegramClient, config: Dict[str, Any]):
+        if client is None:
+            raise ValueError("TelegramClient实例不能为None")
         self.client = client
         self.config = config
 
