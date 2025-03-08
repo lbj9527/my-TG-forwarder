@@ -64,7 +64,24 @@ Telegram 消息转发工具使用说明
      - 公开频道 ID：-100xxxxxxxxxx
      - 私有频道或群组 ID：-xxxxxxxxxx
 
-5. 常见问题
+5. 单元测试
+
+   5.1 测试环境准备
+   - 安装测试依赖：pip install pytest pytest-asyncio pytest-mock
+   - 确保在项目根目录下运行测试
+
+   5.2 测试用例说明
+   - test_config.py：测试配置文件加载和验证
+   - test_client.py：测试客户端连接和授权
+   - test_message.py：测试消息收集和转发
+
+   5.3 运行测试
+   - 运行所有测试：pytest tests/
+   - 运行指定模块：pytest tests/test_config.py
+   - 查看详细输出：pytest -v tests/
+   - 显示测试覆盖率：pytest --cov=src tests/
+
+6. 常见问题
    Q：如何获取频道 ID？
    A：可以通过转发频道消息到 @getidsbot 获取
 
@@ -72,4 +89,4 @@ Telegram 消息转发工具使用说明
    A：这是 Telegram 的限制机制，请增加 message_interval 的值
 
    Q：如何处理代理连接问题？
-   A：确保代理服务器正常运行，并正确配置代理参数# my-TG-forwarder
+   A：确保代理服务器正常运行，并正确配置代理参数
