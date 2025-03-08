@@ -1,0 +1,34 @@
+# Python虚拟环境
+.venv/
+venv/
+env/
+ENV/
+
+# Telegram会话文件
+*.session
+*.session-journal
+
+# 日志文件
+*.log
+*.log.*
+*.zip
+
+# Python缓存文件
+__pycache__/
+*.py[cod]
+*$py.class
+
+# 分发/打包
+dist/
+build/
+*.egg-info/
+
+# 本地配置
+.env
+.env.local
+
+# IDE配置
+.idea/
+.vscode/
+*.swp
+*.swo
