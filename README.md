@@ -46,6 +46,7 @@ Telegram 消息转发工具使用说明
 
    - message_interval：消息转发间隔时间（秒），建议设置大于 0 的值以避免触发限制
    - session_name：会话名称，用于保存登录状态
+   - hide_author：是否隐藏转发消息的原作者（true/false），默认为 true 表示隐藏原作者信息
 
 3. 运行程序
 

@@ -126,12 +126,15 @@ class MessageHandler:
     async def send_message(self, target_entity: Any, message: Union[Any, List[Any]]) -> None:
         """发送单条消息或媒体组消息"""
         try:
+            # 从配置中获取hide_author设置，如果不存在则默认为True
+            hide_author = self.config.get('hide_author', True)
+            
             if isinstance(message, list):
                 # 转发媒体组消息
-                await self.client.forward_messages(target_entity, message, drop_author=True)
+                await self.client.forward_messages(target_entity, message, drop_author=hide_author)
             else:
                 # 转发单条消息
-                await self.client.forward_messages(target_entity, message, drop_author=True)
+                await self.client.forward_messages(target_entity, message, drop_author=hide_author)
             
             # 添加延迟，避免触发限制
             await asyncio.sleep(self.config['message_interval'])

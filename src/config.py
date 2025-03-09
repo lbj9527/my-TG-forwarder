@@ -133,8 +133,11 @@ class ConfigValidator:
             errors.append("缺少message_interval配置")
         elif not isinstance(config['message_interval'], (int, float)) or config['message_interval'] < 0:
             errors.append("message_interval必须是非负数")
+            
+        # 验证hide_author配置项，如果存在则必须是布尔值
+        if 'hide_author' in config and not isinstance(config['hide_author'], bool):
+            errors.append("hide_author必须是布尔值")
         return errors
-
     @classmethod
     async def validate_config(cls, config: Dict[str, Any]) -> Dict[str, Any]:
         """验证配置文件参数的有效性"""
