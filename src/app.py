@@ -4,6 +4,7 @@ from telethon.errors import ChannelPrivateError, ChatAdminRequiredError
 from .config import ConfigManager
 from .client import TelegramClientManager
 from .message import MessageCollector, MessageHandler
+from .utils import parse_channel_link
 
 class ForwarderApp:
     """Telegram消息转发应用类，负责协调和管理整个应用的功能"""
@@ -38,13 +39,19 @@ class ForwarderApp:
             # 初始化消息收集器
             self.message_collector = MessageCollector(client)
             
-            # 设置频道信息
-            self.source_channel = self.config['source_channel']
-            self.target_channels = (
-                [self.config['target_channel']]
-                if isinstance(self.config['target_channel'], str)
-                else list(self.config['target_channel'])
-            )
+            # 设置频道信息并解析频道链接
+            self.source_channel = parse_channel_link(self.config['source_channel'])
+            
+            # 解析目标频道链接
+            if isinstance(self.config['target_channel'], str):
+                parsed_channel = parse_channel_link(self.config['target_channel'])
+                self.target_channels = [parsed_channel] if parsed_channel else []
+            else:
+                self.target_channels = []
+                for channel in self.config['target_channel']:
+                    parsed_channel = parse_channel_link(channel)
+                    if parsed_channel:
+                        self.target_channels.append(parsed_channel)
             
             # 设置消息范围
             self.message_range = self.config['message_range']

@@ -17,6 +17,13 @@ class MessageCollector:
     async def get_entity(self, channel_id: str):
         """获取频道实体"""
         try:
+            # 如果是数字ID（私有频道），转换为整数
+            if channel_id and channel_id.startswith('-100') and channel_id[4:].isdigit():
+                # 去掉'-100'前缀并转换为整数
+                peer_id = int(channel_id[4:])
+                # 使用InputPeerChannel构造正确的实体引用
+                return await self.client.get_entity(InputPeerChannel(peer_id, 0))
+            # 否则按原样处理（用户名或其他格式）
             return await self.client.get_entity(channel_id)
         except Exception as e:
             logger.error(f"获取频道实体失败: {e}")
@@ -27,7 +34,8 @@ class MessageCollector:
             raise ValueError("源频道不能为None")
         """获取实际的消息范围"""
         try:
-            entity = await self.client.get_entity(source_channel)
+            # 使用get_entity方法获取实体，而不是直接使用source_channel
+            entity = await self.get_entity(source_channel)
             if end_id == 0:
                 # 获取最新消息的ID
                 messages = await self.client.get_messages(entity, limit=1)
@@ -46,7 +54,7 @@ class MessageCollector:
         """收集指定范围内的消息"""
         try:
             # 获取频道实体
-            entity = await self.client.get_entity(source_channel)
+            entity = await self.get_entity(source_channel)
             logger.info(f"开始收集消息，范围: {start_id} - {end_id}")
             
             # 存储所有消息
