@@ -5,6 +5,8 @@ from telethon.errors import FloodWaitError, ChannelPrivateError, ChatAdminRequir
 from loguru import logger
 import asyncio
 import time
+import os
+import tempfile
 
 class MessageCollector:
     """消息收集器类，负责收集和处理消息"""
@@ -127,27 +129,150 @@ class MessageHandler:
             raise ValueError("TelegramClient实例不能为None")
         self.client = client
         self.config = config
+        # 创建临时目录用于存储下载的文件
+        import os
+        self.temp_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'src', 'tmp_file')
+        os.makedirs(self.temp_dir, exist_ok=True)
 
-    async def send_message(self, target_entity: Any, message: Union[Any, List[Any]]) -> None:
+    async def download_progress_callback(self, current: int, total: int) -> None:
+        """显示下载进度的回调函数"""
+        print(f'下载进度: {current * 100 / total:.1f}%')
+
+    async def progress_callback(self, current: int, total: int) -> None:
+        """显示上传进度的回调函数"""
+        print(f'上传进度: {current * 100 / total:.1f}%')
+
+    async def download_media_files(self, message: Union[Any, List[Any]]) -> tuple[list, Optional[str]]:
+        """下载媒体文件并返回文件路径列表和说明文字"""
+        media_files = []
+        caption = None
+        
+        try:
+            if isinstance(message, list):
+                # 处理媒体组消息
+                for msg in message:
+                    if msg.media:
+                        # 为每个文件生成临时文件路径，包含扩展名
+                        file_name = f'media_{msg.id}'
+                        if hasattr(msg.media, 'document') and msg.media.document.mime_type:
+                            ext = msg.media.document.mime_type.split('/')[-1]
+                            file_name = f'{file_name}.{ext}'
+                        temp_path = os.path.join(self.temp_dir, file_name)
+                        # 下载媒体文件
+                        downloaded_file = await self.client.download_media(
+                            msg.media,
+                            temp_path,
+                            progress_callback=self.download_progress_callback
+                        )
+                        if downloaded_file and os.path.exists(downloaded_file):
+                            media_files.append(downloaded_file)
+                        else:
+                            logger.error(f"文件下载失败: {temp_path}")
+                caption = message[0].message if message[0].message else None
+            else:
+                # 处理单条消息
+                if message.media:
+                    temp_path = os.path.join(self.temp_dir, f'media_{message.id}')
+                    downloaded_file = await self.client.download_media(
+                        message.media,
+                        temp_path,
+                        progress_callback=self.download_progress_callback
+                    )
+                    if downloaded_file and os.path.exists(downloaded_file):
+                        media_files.append(downloaded_file)
+                    caption = message.message
+        except Exception as e:
+            logger.error(f"下载媒体文件失败: {e}")
+            # 清理已下载的文件
+            for temp_file in media_files:
+                try:
+                    os.remove(temp_file)
+                except:
+                    pass
+            raise
+        
+        return media_files, caption
+
+    async def send_message(self, target_entity: Any, message: Union[Any, List[Any]], media_files: List[str] = None, caption: Optional[str] = None) -> bool:
         """发送单条消息或媒体组消息"""
         try:
             # 从配置中获取hide_author设置，如果不存在则默认为True
             hide_author = self.config.get('hide_author', True)
+            local_media_files = media_files or []
+            local_caption = caption
+            need_cleanup = False
             
-            if isinstance(message, list):
-                # 转发媒体组消息
+            # 先尝试直接转发
+            try:
                 await self.client.forward_messages(target_entity, message, drop_author=hide_author)
-            else:
-                # 转发单条消息
-                await self.client.forward_messages(target_entity, message, drop_author=hide_author)
+                return True
+            except Exception as e:
+                if "You can't forward messages from a protected chat" in str(e):
+                    # 如果是受保护的频道，且没有提供媒体文件，则下载文件
+                    if not local_media_files:
+                        local_media_files, local_caption = await self.download_media_files(message)
+                        need_cleanup = True  # 标记这些文件需要在此方法内清理
+                    
+                    if local_media_files:
+                        try:
+                            # 发送媒体文件
+                            await self.client.send_file(
+                                target_entity,
+                                file=local_media_files,
+                                caption=local_caption,
+                                allow_cache=True,
+                                progress_callback=self.progress_callback
+                            )
+                            logger.info(f"使用send_file成功发送媒体消息")
+                            return True
+                        except Exception as inner_e:
+                            logger.error(f"使用send_file发送媒体消息失败: {inner_e}")
+                            # 如果是媒体组消息，尝试逐个发送
+                            if isinstance(message, list):
+                                success = True
+                                for i, msg in enumerate(message):
+                                    try:
+                                        single_caption = msg.message if i == 0 else None
+                                        await self.client.send_file(
+                                            target_entity,
+                                            file=msg.media,
+                                            caption=single_caption,
+                                            allow_cache=True
+                                        )
+                                        await asyncio.sleep(0.5)
+                                    except Exception as single_e:
+                                        logger.error(f"发送单个媒体文件失败: {single_e}")
+                                        success = False
+                                return success
+                            return False
+                    else:
+                        # 纯文本消息
+                        if not isinstance(message, list):
+                            await self.client.send_message(
+                                target_entity,
+                                message=message.message
+                            )
+                            logger.info(f"成功发送纯文本消息")
+                            return True
+                else:
+                    raise  # 如果是其他错误，继续抛出
             
             # 添加延迟，避免触发限制
             await asyncio.sleep(self.config['message_interval'])
+            return False
         except FloodWaitError as e:
             logger.warning(f"触发频率限制，等待 {e.seconds} 秒")
             await asyncio.sleep(e.seconds)
             # 重试发送
-            await self.send_message(target_entity, message)
+            return await self.send_message(target_entity, message, local_media_files, local_caption)
         except Exception as e:
             logger.error(f"转发消息失败: {e}")
-            raise
+            return False
+        finally:
+            # 只有当这些文件是在此方法内下载的，才在此方法内清理
+            if need_cleanup and local_media_files:
+                for temp_file in local_media_files:
+                    try:
+                        os.remove(temp_file)
+                    except:
+                        pass

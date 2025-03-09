@@ -118,18 +118,60 @@ class ForwarderApp:
                 return
             
             # 按消息循环，同时转发到所有目标频道
+            total_messages = len(messages)
+            total_targets = len(target_entities)
+            successful_forwards = 0
+            
             for i, message in enumerate(messages):
-                logger.info(f"正在转发第 {i+1}/{len(messages)} 条消息到所有目标频道...")
+                logger.info(f"正在转发第 {i+1}/{total_messages} 条消息到所有目标频道...")
+                
+                # 预先下载媒体文件，只下载一次
+                media_files = None
+                caption = None
+                try:
+                    # 尝试直接转发，如果失败则预先下载媒体文件
+                    try:
+                        # 尝试向第一个目标频道转发，检查是否需要下载媒体
+                        first_target = next(iter(target_entities.values()))
+                        await self.client_manager.client.forward_messages(first_target, message, drop_author=self.config.get('hide_author', True))
+                    except Exception as e:
+                        if "You can't forward messages from a protected chat" in str(e):
+                            # 如果是受保护的频道，预先下载媒体文件
+                            media_files, caption = await self.message_handler.download_media_files(message)
+                            logger.info(f"已预先下载媒体文件，准备发送到所有目标频道")
+                        else:
+                            # 其他错误，继续尝试转发
+                            pass
+                except Exception as e:
+                    logger.error(f"预处理消息时出错: {e}")
                 
                 # 同时转发到所有目标频道
                 for target_channel, target_entity in target_entities.items():
                     try:
-                        await self.message_handler.send_message(target_entity, message)
-                        logger.info(f"消息 {i+1}/{len(messages)} 成功转发到频道 {target_channel}")
+                        success = await self.message_handler.send_message(target_entity, message, media_files, caption)
+                        if success:
+                            successful_forwards += 1
+                            logger.info(f"消息 {i+1}/{total_messages} 成功转发到频道 {target_channel}")
+                        else:
+                            logger.error(f"消息 {i+1}/{total_messages} 转发到频道 {target_channel} 失败")
                     except Exception as e:
                         logger.error(f"向频道 {target_channel} 转发消息 {i+1} 时出错: {e}")
+                
+                # 清理已下载的媒体文件
+                if media_files:
+                    for temp_file in media_files:
+                        try:
+                            import os
+                            os.remove(temp_file)
+                        except Exception as e:
+                            logger.error(f"清理临时文件失败: {e}")
             
-            logger.info("所有转发任务完成")
+            # 只有当所有消息都成功转发时才显示完成日志
+            expected_forwards = total_messages * total_targets
+            if successful_forwards == expected_forwards:
+                logger.info("所有转发任务完成")
+            else:
+                logger.warning(f"转发任务结束，但有 {expected_forwards - successful_forwards} 条消息转发失败")
         except Exception as e:
             logger.error(f"运行转发任务失败: {e}")
             raise
