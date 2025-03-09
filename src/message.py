@@ -39,7 +39,7 @@ class MessageCollector:
             if end_id == 0:
                 # 获取最新消息的ID
                 messages = await self.client.get_messages(entity, limit=1)
-                if not messages or len(messages) == 0:
+                if not messages:
                     raise ValueError("无法获取最新消息ID")
                 # 确保messages是一个列表且有元素
                 first_message = messages[0] if isinstance(messages, (list, tuple)) else messages
@@ -76,6 +76,11 @@ class MessageCollector:
                     entity,
                     ids=list(range(current_id, batch_end + 1))
                 )
+                
+                # 确保messages不为None且可迭代
+                if messages is None:
+                    logger.warning(f"批次 {current_id} - {batch_end} 未返回任何消息")
+                    messages = []
                 
                 for message in messages:
                     # 跳过空消息或服务消息
