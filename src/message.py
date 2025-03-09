@@ -7,6 +7,7 @@ import asyncio
 import time
 import os
 import tempfile
+from .downloader import TelegramDownloader
 
 class MessageCollector:
     """消息收集器类，负责收集和处理消息"""
@@ -133,6 +134,8 @@ class MessageHandler:
         import os
         self.temp_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'src', 'tmp_file')
         os.makedirs(self.temp_dir, exist_ok=True)
+        # 初始化下载器
+        self.downloader = TelegramDownloader(client, self.temp_dir)
 
     async def download_progress_callback(self, current: int, total: int) -> None:
         """显示下载进度的回调函数"""
@@ -144,54 +147,8 @@ class MessageHandler:
 
     async def download_media_files(self, message: Union[Any, List[Any]]) -> tuple[list, Optional[str]]:
         """下载媒体文件并返回文件路径列表和说明文字"""
-        media_files = []
-        caption = None
-        
-        try:
-            if isinstance(message, list):
-                # 处理媒体组消息
-                for msg in message:
-                    if msg.media:
-                        # 为每个文件生成临时文件路径，包含扩展名
-                        file_name = f'media_{msg.id}'
-                        if hasattr(msg.media, 'document') and msg.media.document.mime_type:
-                            ext = msg.media.document.mime_type.split('/')[-1]
-                            file_name = f'{file_name}.{ext}'
-                        temp_path = os.path.join(self.temp_dir, file_name)
-                        # 下载媒体文件
-                        downloaded_file = await self.client.download_media(
-                            msg.media,
-                            temp_path,
-                            progress_callback=self.download_progress_callback
-                        )
-                        if downloaded_file and os.path.exists(downloaded_file):
-                            media_files.append(downloaded_file)
-                        else:
-                            logger.error(f"文件下载失败: {temp_path}")
-                caption = message[0].message if message[0].message else None
-            else:
-                # 处理单条消息
-                if message.media:
-                    temp_path = os.path.join(self.temp_dir, f'media_{message.id}')
-                    downloaded_file = await self.client.download_media(
-                        message.media,
-                        temp_path,
-                        progress_callback=self.download_progress_callback
-                    )
-                    if downloaded_file and os.path.exists(downloaded_file):
-                        media_files.append(downloaded_file)
-                    caption = message.message
-        except Exception as e:
-            logger.error(f"下载媒体文件失败: {e}")
-            # 清理已下载的文件
-            for temp_file in media_files:
-                try:
-                    os.remove(temp_file)
-                except:
-                    pass
-            raise
-        
-        return media_files, caption
+        # 使用TelegramDownloader下载媒体文件
+        return await self.downloader.download_media_files(message)
 
     async def _try_forward_message(self, target_entity: Any, message: Any, hide_author: bool) -> bool:
         """尝试直接转发消息"""
