@@ -25,17 +25,15 @@ Telegram 消息转发工具使用说明
 
    - source_channel：源频道，支持以下格式：
 
-     - 频道链接：https://t.me/channel_name
+     - 公有频道/群组链接：https://t.me/channel_name
      - 用户名：@channel_name
+     - 私有频道/群组链接：直接复制消息链接https://t.me/c/2316009417/43405
 
    - target_channel：目标频道，支持单个频道或频道数组，格式如下：
 
-     - 频道链接：https://t.me/channel_name
+     - 公有频道链接：https://t.me/channel_name
      - 用户名：@channel_name
-     - 频道 ID：
-
-       - 公开频道：以"-100"开头，如 "-100xxxxxxxxxx"
-       - 私有频道或群组：以"-"开头，如 "-xxxxxxxxxx"
+     - 私有频道链接：直接复制消息链接https://t.me/c/2316009417/43405
 
        2.4 消息范围设置
 
@@ -60,22 +58,22 @@ Telegram 消息转发工具使用说明
    - 请确保有权限访问源频道和目标频道
    - 建议适当设置消息转发间隔，避免触发 Telegram 的限制
    - 如遇到错误，请查看 forwarder.log 日志文件
-   - 使用频道 ID 时，请注意区分公开频道和私有频道的 ID 格式：
-     - 公开频道 ID：-100xxxxxxxxxx
-     - 私有频道或群组 ID：-xxxxxxxxxx
 
 5. 单元测试
 
    5.1 测试环境准备
+
    - 安装测试依赖：pip install pytest pytest-asyncio pytest-mock
    - 确保在项目根目录下运行测试
 
-   5.2 测试用例说明
+     5.2 测试用例说明
+
    - test_config.py：测试配置文件加载和验证
    - test_client.py：测试客户端连接和授权
    - test_message.py：测试消息收集和转发
 
-   5.3 运行测试
+     5.3 运行测试
+
    - 运行所有测试：pytest tests/
    - 运行指定模块：pytest tests/test_config.py
    - 查看详细输出：pytest -v tests/
