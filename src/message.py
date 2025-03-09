@@ -207,7 +207,9 @@ class MessageHandler:
                 await self.client.forward_messages(target_entity, message, drop_author=hide_author)
                 return True
             except Exception as e:
+                # 只处理受保护频道的错误，其他错误直接抛出
                 if "You can't forward messages from a protected chat" in str(e):
+                    logger.info("检测到受保护频道，尝试使用备选发送方案")
                     # 如果是受保护的频道，且没有提供媒体文件，则下载文件
                     if not local_media_files:
                         local_media_files, local_caption = await self.download_media_files(message)
@@ -223,7 +225,7 @@ class MessageHandler:
                                 allow_cache=True,
                                 progress_callback=self.progress_callback
                             )
-                            logger.info(f"使用send_file成功发送媒体消息")
+                            logger.info("使用send_file成功发送媒体消息")
                             return True
                         except Exception as inner_e:
                             logger.error(f"使用send_file发送媒体消息失败: {inner_e}")
@@ -252,14 +254,13 @@ class MessageHandler:
                                 target_entity,
                                 message=message.message
                             )
-                            logger.info(f"成功发送纯文本消息")
+                            logger.info("成功发送纯文本消息")
                             return True
+                        return False  # 对于媒体组消息，如果没有媒体文件，则返回失败
                 else:
-                    raise  # 如果是其他错误，继续抛出
-            
-            # 添加延迟，避免触发限制
-            await asyncio.sleep(self.config['message_interval'])
-            return False
+                    # 如果是其他错误，记录详细信息并抛出
+                    logger.error(f"转发消息失败，错误类型: {type(e).__name__}, 错误信息: {str(e)}")
+                    raise
         except FloodWaitError as e:
             logger.warning(f"触发频率限制，等待 {e.seconds} 秒")
             await asyncio.sleep(e.seconds)

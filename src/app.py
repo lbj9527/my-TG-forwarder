@@ -128,27 +128,42 @@ class ForwarderApp:
                 # 预先下载媒体文件，只下载一次
                 media_files = None
                 caption = None
+                is_protected = False
                 try:
-                    # 尝试直接转发，如果失败则预先下载媒体文件
+                    # 检查是否需要预先下载媒体文件
                     try:
-                        # 尝试向第一个目标频道转发，检查是否需要下载媒体
+                        # 尝试向第一个目标频道转发以检查是否是受保护的频道
                         first_target = next(iter(target_entities.values()))
-                        await self.client_manager.client.forward_messages(first_target, message, drop_author=self.config.get('hide_author', True))
+                        test_message = message
+                        await self.client_manager.client.forward_messages(first_target, test_message, drop_author=self.config.get('hide_author', True))
+                        # 记录第一个目标频道的转发成功
+                        successful_forwards += 1
+                        logger.info(f"消息 {i+1}/{total_messages} 成功转发到频道 {next(iter(target_entities.keys()))}")
                     except Exception as e:
                         if "You can't forward messages from a protected chat" in str(e):
                             # 如果是受保护的频道，预先下载媒体文件
+                            is_protected = True
                             media_files, caption = await self.message_handler.download_media_files(message)
                             logger.info(f"已预先下载媒体文件，准备发送到所有目标频道")
                         else:
-                            # 其他错误，继续尝试转发
-                            pass
+                            # 其他错误，记录失败
+                            logger.error(f"向第一个目标频道转发消息时出错: {e}")
                 except Exception as e:
                     logger.error(f"预处理消息时出错: {e}")
                 
-                # 同时转发到所有目标频道
-                for target_channel, target_entity in target_entities.items():
+                # 转发到剩余的目标频道
+                remaining_targets = list(target_entities.items())
+                if not is_protected:
+                    # 如果不是受保护的频道，跳过第一个已经转发成功的目标
+                    remaining_targets = remaining_targets[1:]
+                
+                for target_channel, target_entity in remaining_targets:
                     try:
-                        success = await self.message_handler.send_message(target_entity, message, media_files, caption)
+                        if is_protected:
+                            success = await self.message_handler.send_message(target_entity, message, media_files, caption)
+                        else:
+                            success = await self.client_manager.client.forward_messages(target_entity, message, drop_author=self.config.get('hide_author', True)) is not None
+                        
                         if success:
                             successful_forwards += 1
                             logger.info(f"消息 {i+1}/{total_messages} 成功转发到频道 {target_channel}")
