@@ -128,10 +128,10 @@ class MessageHandler:
         try:
             if isinstance(message, list):
                 # 转发媒体组消息
-                await self.client.forward_messages(target_entity, message)
+                await self.client.forward_messages(target_entity, message, drop_author=True)
             else:
                 # 转发单条消息
-                await self.client.forward_messages(target_entity, message)
+                await self.client.forward_messages(target_entity, message, drop_author=True)
             
             # 添加延迟，避免触发限制
             await asyncio.sleep(self.config['message_interval'])
