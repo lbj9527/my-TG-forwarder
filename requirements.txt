@@ -2,3 +2,5 @@ telethon>=1.29.2
 python-socks>=2.4.3
 loguru>=0.7.2
 async_timeout>=4.0.3
+tqdm>=4.65.0
+humanize>=4.7.0
