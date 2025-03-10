@@ -6,6 +6,7 @@ import os
 import asyncio
 from tqdm import tqdm
 import humanize
+import async_timeout
 
 class TelegramDownloader:
     """高效的Telegram文件下载器"""
@@ -19,7 +20,10 @@ class TelegramDownloader:
         """
         self.client = client
         self.temp_dir = temp_dir
-        self._chunk_size = 1024 * 1024  # 1MB chunks for better performance
+        self._chunk_size = 4 * 1024 * 1024  # 调整为4MB分块以提高性能
+        self._download_timeout = 180  # 下载超时时间（秒）
+        self._max_concurrent_downloads = 2  # 最大并发下载数
+        self._semaphore = asyncio.Semaphore(self._max_concurrent_downloads)
         
     async def _create_progress_bar(self, total: int, desc: str) -> tqdm:
         """创建进度条"""
@@ -43,35 +47,43 @@ class TelegramDownloader:
             下载成功返回文件路径，失败返回None
         """
         try:
-            if not message.media:
+            # 使用信号量限制并发下载数量
+            async with self._semaphore:
+                if not message.media:
+                    return None
+                    
+                # 获取文件大小
+                file_size = message.media.document.size if hasattr(message.media, 'document') else 0
+                human_size = humanize.naturalsize(file_size)
+                
+                # 创建进度条
+                progress_bar = await self._create_progress_bar(
+                    total=file_size,
+                    desc=f'下载文件 ({human_size})'
+                )
+                
+                # 使用异步方式下载，并设置超时
+                async with async_timeout.timeout(self._download_timeout):
+                    downloaded_file = await self.client.download_media(
+                        message.media,
+                        file_path,
+                        progress_callback=lambda current, total: (
+                            progress_bar.update(current - progress_bar.n)
+                        )
+                    )
+                
+                progress_bar.close()
+                
+                if downloaded_file and os.path.exists(downloaded_file):
+                    logger.info(f'文件下载完成: {downloaded_file} ({human_size})')
+                    return downloaded_file
                 return None
                 
-            # 获取文件大小
-            file_size = message.media.document.size if hasattr(message.media, 'document') else 0
-            human_size = humanize.naturalsize(file_size)
-            
-            # 创建进度条
-            progress_bar = await self._create_progress_bar(
-                total=file_size,
-                desc=f'下载文件 ({human_size})'
-            )
-            
-            # 使用异步方式下载，并更新进度条
-            downloaded_file = await self.client.download_media(
-                message.media,
-                file_path,
-                progress_callback=lambda current, total: (
-                    progress_bar.update(current - progress_bar.n)
-                )
-            )
-            
-            progress_bar.close()
-            
-            if downloaded_file and os.path.exists(downloaded_file):
-                logger.info(f'文件下载完成: {downloaded_file} ({human_size})')
-                return downloaded_file
+        except asyncio.TimeoutError:
+            logger.error(f'文件下载超时')
+            if os.path.exists(file_path):
+                os.remove(file_path)
             return None
-            
         except Exception as e:
             logger.error(f'文件下载失败: {e}')
             if os.path.exists(file_path):
@@ -93,6 +105,8 @@ class TelegramDownloader:
         try:
             if isinstance(message, list):
                 # 处理媒体组消息
+                download_tasks = []
+                
                 for msg in message:
                     if msg.media:
                         file_name = f'media_{msg.id}'
@@ -101,7 +115,13 @@ class TelegramDownloader:
                             file_name = f'{file_name}.{ext}'
                         temp_path = os.path.join(self.temp_dir, file_name)
                         
-                        downloaded_file = await self._download_file(msg, temp_path)
+                        # 创建下载任务
+                        download_tasks.append(self._download_file(msg, temp_path))
+                
+                # 并发执行所有下载任务，但限制并发数
+                if download_tasks:
+                    downloaded_files = await asyncio.gather(*download_tasks)
+                    for downloaded_file in downloaded_files:
                         if downloaded_file:
                             media_files.append(downloaded_file)
                             
